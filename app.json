@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Pharmacie CI",
+    "slug": "pharmacie-ci",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "pharmacieci",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.pharmacieci.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E8F5E9",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.pharmacieci.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Pharmacie CI utilise votre position pour trouver les pharmacies proches."
+        }
+      ]
+    ]
+  }
+}
