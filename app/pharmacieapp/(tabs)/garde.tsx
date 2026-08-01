@@ -265,12 +265,7 @@ export default function GardeScreen() {
             </Text>
           </View>
         }
-        ListFooterComponent={
-          <View style={styles.adContainer}>
-            <BannerAd unitId={BANNER_AD_ID} size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER} />
-          </View>
-        }
-        contentContainerStyle={{ paddingTop: Spacing.sm, paddingBottom: 100 }}
+        contentContainerStyle={{ paddingTop: Spacing.sm, paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
       />
 
@@ -396,6 +391,11 @@ export default function GardeScreen() {
           )}
         </SafeAreaView>
       </Modal>
+
+      {/* Fixed Banner Ad */}
+      <View style={styles.adContainer}>
+        <BannerAd unitId={BANNER_AD_ID} size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER} />
+      </View>
     </SafeAreaView>
   );
 }
@@ -767,6 +767,8 @@ const styles = StyleSheet.create({
   },
   adContainer: {
     alignItems: 'center',
-    paddingVertical: Spacing.lg,
+    backgroundColor: Colors.background,
+    borderTopWidth: 1,
+    borderTopColor: Colors.borderLight,
   },
 });

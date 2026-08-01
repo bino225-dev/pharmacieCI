@@ -297,6 +297,11 @@ export default function PharmacyDetailScreen() {
           </View>
         </View>
 
+        {/* Square Ad */}
+        <View style={styles.adSquareContainer}>
+          <BannerAd unitId={BANNER_AD_ID} size={BannerAdSize.MEDIUM_RECTANGLE} />
+        </View>
+
         {/* Map Section */}
         {pharmacy.location && pharmacy.location.latitude != null && pharmacy.location.longitude != null && (
           <View style={styles.section}>
@@ -397,15 +402,9 @@ export default function PharmacyDetailScreen() {
           </View>
         ) : null}
 
-        {/* Banner Ad */}
-        <View style={styles.adContainer}>
-          <BannerAd
-            unitId={BANNER_AD_ID}
-            size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
-          />
-        </View>
         </View>
       </Animated.ScrollView>
+
     </View>
   );
 }
@@ -820,9 +819,8 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     lineHeight: 22,
   },
-  adContainer: {
+  adSquareContainer: {
     alignItems: 'center',
-    paddingTop: Spacing.xxl,
-    paddingBottom: Spacing.md,
+    paddingTop: Spacing.xl,
   },
 });
