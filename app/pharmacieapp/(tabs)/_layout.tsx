@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Platform, View } from 'react-native';
+import { Platform } from 'react-native';
 import { Colors } from '@/constants/theme';
 
 export default function TabsLayout() {
@@ -11,21 +11,24 @@ export default function TabsLayout() {
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textMuted,
         tabBarStyle: {
-          backgroundColor: Colors.surface,
-          borderTopWidth: 0,
-          height: Platform.OS === 'ios' ? 88 : 65,
-          paddingBottom: Platform.OS === 'ios' ? 28 : 10,
+          backgroundColor: Colors.surfaceContainerLowest,
+          borderTopWidth: 1,
+          borderTopColor: Colors.borderLight,
+          height: Platform.OS === 'ios' ? 88 : 68,
+          paddingBottom: Platform.OS === 'ios' ? 28 : 12,
           paddingTop: 8,
-          elevation: 20,
+          elevation: 0,
           shadowColor: Colors.shadow,
-          shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.08,
-          shadowRadius: 12,
+          shadowOffset: { width: 0, height: -1 },
+          shadowOpacity: 0.04,
+          shadowRadius: 4,
         },
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '700',
-          letterSpacing: 0.3,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          marginTop: 2,
         },
         tabBarItemStyle: {
           gap: 2,
@@ -37,14 +40,11 @@ export default function TabsLayout() {
         options={{
           title: 'Annuaire',
           tabBarIcon: ({ color, focused }) => (
-            <View style={focused ? {
-              backgroundColor: Colors.primaryLight,
-              borderRadius: 12,
-              paddingHorizontal: 16,
-              paddingVertical: 4,
-            } : undefined}>
-              <Ionicons name={focused ? 'search' : 'search-outline'} size={22} color={color} />
-            </View>
+            <Ionicons
+              name={focused ? 'search' : 'search-outline'}
+              size={22}
+              color={focused ? Colors.primary : color}
+            />
           ),
         }}
       />
@@ -52,15 +52,13 @@ export default function TabsLayout() {
         name="garde"
         options={{
           title: 'De Garde',
+          tabBarActiveTintColor: Colors.accent,
           tabBarIcon: ({ color, focused }) => (
-            <View style={focused ? {
-              backgroundColor: Colors.primaryLight,
-              borderRadius: 12,
-              paddingHorizontal: 16,
-              paddingVertical: 4,
-            } : undefined}>
-              <Ionicons name={focused ? 'moon' : 'moon-outline'} size={22} color={color} />
-            </View>
+            <Ionicons
+              name={focused ? 'moon' : 'moon-outline'}
+              size={22}
+              color={focused ? Colors.accent : color}
+            />
           ),
         }}
       />

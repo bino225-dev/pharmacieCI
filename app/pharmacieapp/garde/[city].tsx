@@ -8,7 +8,7 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/hooks/firebaseConfig';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius } from '@/constants/theme';
+import { Colors, Spacing, BorderRadius, Shadows } from '@/constants/theme';
 
 interface Zone {
   id: string;
@@ -42,10 +42,8 @@ export default function GardeCityScreen() {
     const fetchData = async () => {
       try {
         if (zoneName) {
-          // Mode: afficher les gardes pour une zone specifique
           await fetchGardes();
         } else {
-          // Verifier si la ville a des zones/communes
           const zonesSnap = await getDocs(
             query(collection(db, 'zones'), where('cityId', '==', cityId))
           );
@@ -56,7 +54,6 @@ export default function GardeCityScreen() {
             setZones(zonesData);
             setHasZones(true);
           } else {
-            // Pas de zones → afficher directement les gardes
             await fetchGardes();
           }
         }
@@ -81,13 +78,14 @@ export default function GardeCityScreen() {
         } as GardeEntry;
       });
 
-      // Filtrer par nom de ville
-      let filtered = all.filter(g => g.city.toUpperCase() === cityName.toUpperCase());
+      let filtered = all.filter(g => {
+        if (g.city.toUpperCase() === cityName.toUpperCase()) return true;
+        if (g.zone.toUpperCase() === cityName.toUpperCase()) return true;
+        return g.pharmacies.some(p => (p.zone || '').toUpperCase() === cityName.toUpperCase());
+      });
 
-      // Si une zone est selectionnee, filtrer aussi par zone
       if (zoneName) {
         filtered = filtered.filter(g => {
-          // Verifier la zone du document ou les zones des pharmacies
           if (g.zone.toUpperCase() === zoneName.toUpperCase()) return true;
           return g.pharmacies.some(p => (p.zone || '').toUpperCase() === zoneName.toUpperCase());
         });
@@ -128,7 +126,7 @@ export default function GardeCityScreen() {
     );
   }
 
-  // === MODE ZONES (communes) ===
+  // === MODE ZONES ===
   if (hasZones && !zoneName) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -137,8 +135,11 @@ export default function GardeCityScreen() {
             <Ionicons name="arrow-back" size={22} color={Colors.text} />
           </TouchableOpacity>
           <View style={styles.headerInfo}>
+            <Text style={styles.headerLabelCaps}>COMMUNES</Text>
             <Text style={styles.headerTitle}>{cityName}</Text>
-            <Text style={styles.headerSubtitle}>{zones.length} commune{zones.length > 1 ? 's' : ''}</Text>
+          </View>
+          <View style={styles.headerBadge}>
+            <Text style={styles.headerBadgeText}>{zones.length}</Text>
           </View>
         </View>
 
@@ -170,20 +171,18 @@ export default function GardeCityScreen() {
               onPress={() => router.push(
                 `/pharmacieapp/garde/${encodeURIComponent(cityId)}?name=${encodeURIComponent(cityName)}&zone=${encodeURIComponent(item.name)}`
               )}
-              activeOpacity={0.6}
+              activeOpacity={0.7}
             >
-              <View style={styles.zoneIcon}>
-                <Ionicons name="navigate" size={20} color={Colors.primary} />
+              <View style={styles.zoneInitial}>
+                <Text style={styles.zoneInitialText}>{item.name.charAt(0)}</Text>
               </View>
               <View style={styles.zoneInfo}>
                 <Text style={styles.zoneName}>{item.name}</Text>
               </View>
-              <View style={styles.chevron}>
-                <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-              </View>
+              <Ionicons name="chevron-forward" size={18} color={Colors.borderLight} />
             </TouchableOpacity>
           )}
-          contentContainerStyle={{ paddingBottom: 20 }}
+          contentContainerStyle={{ paddingTop: Spacing.sm, paddingBottom: 20 }}
           showsVerticalScrollIndicator={false}
         />
       </SafeAreaView>
@@ -198,11 +197,11 @@ export default function GardeCityScreen() {
           <Ionicons name="arrow-back" size={22} color={Colors.text} />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
+          <Text style={styles.headerLabelCaps}>
+            {zoneName ? cityName : 'PHARMACIES DE GARDE'}
+          </Text>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {zoneName || cityName}
-          </Text>
-          <Text style={styles.headerSubtitle}>
-            {zoneName ? cityName + ' • ' : ''}Pharmacies de garde
           </Text>
         </View>
       </View>
@@ -214,10 +213,10 @@ export default function GardeCityScreen() {
           const active = isCurrentlyActive(item.startDate, item.endDate);
           return (
             <View style={[styles.gardeCard, active && styles.gardeCardActive]}>
-              {/* Periode */}
+              {/* Period */}
               <View style={styles.periodRow}>
                 <View style={[styles.periodBadge, active && styles.periodBadgeActive]}>
-                  <Ionicons name="calendar" size={14} color={active ? Colors.surface : Colors.primary} />
+                  <Ionicons name="calendar-outline" size={13} color={active ? '#FFFFFF' : Colors.textSecondary} />
                   <Text style={[styles.periodText, active && styles.periodTextActive]}>
                     {formatDate(item.startDate)} — {formatDate(item.endDate)}
                   </Text>
@@ -225,7 +224,7 @@ export default function GardeCityScreen() {
                 {active && (
                   <View style={styles.liveIndicator}>
                     <View style={styles.livePulse} />
-                    <Text style={styles.liveText}>En cours</Text>
+                    <Text style={styles.liveText}>EN COURS</Text>
                   </View>
                 )}
               </View>
@@ -235,20 +234,21 @@ export default function GardeCityScreen() {
                 {item.pharmacies.map((p, idx) => (
                   <TouchableOpacity
                     key={p.pharmacyId || idx}
-                    style={styles.pharmacyCard}
-                    activeOpacity={0.6}
+                    style={[
+                      styles.pharmacyCard,
+                      idx === item.pharmacies.length - 1 && styles.pharmacyCardLast,
+                    ]}
+                    activeOpacity={0.7}
                     onPress={() => p.pharmacyId && router.push(`/pharmacieapp/pharmacy/${p.pharmacyId}`)}
                   >
-                    <View style={styles.pharmacyIcon}>
-                      <Ionicons name="medical" size={20} color={Colors.primary} />
+                    <View style={[styles.pharmacyIcon, active && styles.pharmacyIconActive]}>
+                      <Ionicons name="medical" size={18} color={active ? '#FFFFFF' : Colors.primary} />
                     </View>
                     <View style={styles.pharmacyInfo}>
                       <Text style={styles.pharmacyName} numberOfLines={1}>{p.name}</Text>
                       {p.zone && <Text style={styles.pharmacyZone}>{p.zone}</Text>}
                     </View>
-                    <View style={styles.pharmacyChevron}>
-                      <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={Colors.borderLight} />
                   </TouchableOpacity>
                 ))}
               </View>
@@ -258,7 +258,7 @@ export default function GardeCityScreen() {
         ListEmptyComponent={
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
-              <Ionicons name="moon-outline" size={40} color={Colors.textMuted} />
+              <Ionicons name="moon-outline" size={36} color={Colors.textMuted} />
             </View>
             <Text style={styles.emptyTitle}>Aucune pharmacie de garde</Text>
             <Text style={styles.emptySubtitle}>
@@ -284,45 +284,61 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: Colors.background,
   },
+
+  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     paddingHorizontal: Spacing.lg,
     paddingVertical: 14,
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.surfaceContainerLowest,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: Colors.borderLight,
   },
   backBtn: {
     width: 40,
     height: 40,
-    borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.background,
+    borderRadius: 20,
+    backgroundColor: Colors.surfaceContainer,
     justifyContent: 'center',
     alignItems: 'center',
   },
   headerInfo: {
     flex: 1,
   },
+  headerLabelCaps: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    color: Colors.accent,
+    marginBottom: 1,
+  },
   headerTitle: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '700',
     color: Colors.text,
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
   },
-  headerSubtitle: {
+  headerBadge: {
+    backgroundColor: Colors.surfaceContainer,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: BorderRadius.full,
+  },
+  headerBadgeText: {
     fontSize: 13,
-    color: Colors.textMuted,
-    marginTop: 1,
+    fontWeight: '700',
+    color: Colors.text,
   },
+
   // Search
   searchContainer: {
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.surfaceContainerLowest,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: Colors.borderLight,
   },
   searchBar: {
     flexDirection: 'row',
@@ -330,16 +346,15 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.surfaceContainerLow,
   },
   searchInput: {
     flex: 1,
     fontSize: 15,
     color: Colors.text,
   },
+
   // Zone cards
   zoneCard: {
     flexDirection: 'row',
@@ -347,17 +362,26 @@ const styles = StyleSheet.create({
     gap: 14,
     paddingVertical: 14,
     paddingHorizontal: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderLight,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.sm,
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(189,202,186,0.15)',
+    ...Shadows.sm,
   },
-  zoneIcon: {
+  zoneInitial: {
     width: 44,
     height: 44,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.primaryLight,
+    borderRadius: 22,
+    backgroundColor: Colors.surfaceContainer,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  zoneInitialText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
   },
   zoneInfo: {
     flex: 1,
@@ -367,26 +391,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.text,
   },
-  chevron: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+
   // Garde cards
   gardeCard: {
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.surfaceContainerLowest,
     borderRadius: BorderRadius.lg,
     padding: Spacing.lg,
     borderWidth: 1,
-    borderColor: Colors.border,
-    shadowColor: Colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 1,
+    borderColor: 'rgba(189,202,186,0.15)',
+    ...Shadows.sm,
   },
   gardeCardActive: {
     borderColor: Colors.primary,
@@ -396,43 +409,47 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   periodBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: Colors.primaryLight,
+    backgroundColor: Colors.surfaceContainerLow,
     borderRadius: BorderRadius.sm,
     paddingHorizontal: 10,
     paddingVertical: 6,
+    flexShrink: 1,
   },
   periodBadgeActive: {
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.primaryContainer,
   },
   periodText: {
     fontSize: 12,
-    fontWeight: '700',
-    color: Colors.primaryDark,
+    fontWeight: '600',
+    color: Colors.textSecondary,
   },
   periodTextActive: {
-    color: Colors.surface,
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   liveIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
+    marginLeft: 8,
   },
   livePulse: {
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: 4,
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.accent,
   },
   liveText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.primary,
+    fontSize: 10,
+    fontWeight: '800',
+    color: Colors.accent,
+    letterSpacing: 0.8,
   },
   pharmaciesList: {
     gap: 0,
@@ -440,18 +457,24 @@ const styles = StyleSheet.create({
   pharmacyCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: Colors.borderLight,
   },
+  pharmacyCardLast: {
+    borderBottomWidth: 0,
+  },
   pharmacyIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.primaryLight,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.surfaceContainerLow,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  pharmacyIconActive: {
+    backgroundColor: Colors.primaryContainer,
   },
   pharmacyInfo: {
     flex: 1,
@@ -464,16 +487,10 @@ const styles = StyleSheet.create({
   },
   pharmacyZone: {
     fontSize: 13,
-    color: Colors.textSecondary,
+    color: Colors.textMuted,
   },
-  pharmacyChevron: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+
+  // Empty
   empty: {
     alignItems: 'center',
     paddingVertical: 80,
@@ -483,7 +500,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: Colors.borderLight,
+    backgroundColor: Colors.surfaceContainerHigh,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,

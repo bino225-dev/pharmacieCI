@@ -1,14 +1,20 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Linking, Image, Platform,
+  View, Text, TouchableOpacity, Animated,
+  StyleSheet, ActivityIndicator, Linking, Image, Platform, Share,
+  StatusBar, Dimensions,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '@/hooks/firebaseConfig';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius } from '@/constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Colors, Spacing, BorderRadius, Shadows } from '@/constants/theme';
+import { BannerAd, BannerAdSize } from 'react-native-google-mobile-ads';
+import { BANNER_AD_ID } from '@/hooks/ads';
+
+const HERO_HEIGHT = 300;
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface Pharmacy {
   id: string;
@@ -27,16 +33,50 @@ interface Pharmacy {
 export default function PharmacyDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const scrollY = useRef(new Animated.Value(0)).current;
+
   const [pharmacy, setPharmacy] = useState<Pharmacy | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isOnDuty, setIsOnDuty] = useState(false);
+  const [assuranceNames, setAssuranceNames] = useState<string[]>([]);
 
   useEffect(() => {
     const fetchPharmacy = async () => {
       try {
-        const snap = await getDoc(doc(db, 'pharmacies', id || ''));
+        const [snap, gardeSnap] = await Promise.all([
+          getDoc(doc(db, 'pharmacies', id || '')),
+          getDocs(collection(db, 'pharmacies_de_garde')),
+        ]);
         if (snap.exists()) {
-          setPharmacy({ id: snap.id, ...snap.data() } as Pharmacy);
+          const pharmaData = { id: snap.id, ...snap.data() } as Pharmacy;
+          setPharmacy(pharmaData);
+
+          if (pharmaData.assurances && pharmaData.assurances.length > 0) {
+            const assurDocs = await Promise.all(
+              pharmaData.assurances.map(aId => getDoc(doc(db, 'insurances', aId)))
+            );
+            const names = assurDocs
+              .filter(d => d.exists())
+              .map(d => d.data()?.name || d.id);
+            setAssuranceNames(names);
+          }
         }
+        const now = Date.now();
+        const toMs = (ts: any) => {
+          if (!ts) return 0;
+          if (ts.toDate) return ts.toDate().getTime();
+          if (ts.seconds) return ts.seconds * 1000;
+          return new Date(ts).getTime();
+        };
+        const onDuty = gardeSnap.docs.some(d => {
+          const raw = d.data();
+          if (toMs(raw.startDate) <= now && now <= toMs(raw.endDate)) {
+            return (raw.pharmacies || []).some((p: any) => p.pharmacyId === id);
+          }
+          return false;
+        });
+        setIsOnDuty(onDuty);
       } catch (e) {
         console.error('Erreur chargement pharmacie:', e);
       } finally {
@@ -50,6 +90,58 @@ export default function PharmacyDetailScreen() {
     Linking.openURL(`tel:${phone.replace(/\s/g, '')}`);
   };
 
+  const handleDirections = () => {
+    if (!pharmacy?.location) return;
+    const { latitude, longitude } = pharmacy.location;
+    const label = encodeURIComponent(pharmacy.name);
+    const url = Platform.select({
+      ios: `maps:0,0?q=${label}@${latitude},${longitude}`,
+      android: `geo:${latitude},${longitude}?q=${latitude},${longitude}(${label})`,
+      default: `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`,
+    });
+    Linking.openURL(url!);
+  };
+
+  const handleShare = async () => {
+    if (!pharmacy) return;
+    try {
+      await Share.share({
+        message: `${pharmacy.name} — ${pharmacy.zone || ''}, ${pharmacy.city || ''}\n${pharmacy.phones?.[0] ? 'Tel: ' + pharmacy.phones[0] : ''}`,
+      });
+    } catch (_) {}
+  };
+
+  // Parallax transforms
+  const heroTranslateY = scrollY.interpolate({
+    inputRange: [-HERO_HEIGHT, 0, HERO_HEIGHT],
+    outputRange: [-HERO_HEIGHT / 2, 0, HERO_HEIGHT * 0.4],
+  });
+  const heroScale = scrollY.interpolate({
+    inputRange: [-HERO_HEIGHT, 0],
+    outputRange: [2, 1],
+    extrapolateRight: 'clamp',
+  });
+  const heroOpacity = scrollY.interpolate({
+    inputRange: [0, HERO_HEIGHT * 0.6],
+    outputRange: [1, 0.3],
+    extrapolate: 'clamp',
+  });
+  const overlayOpacity = scrollY.interpolate({
+    inputRange: [0, HERO_HEIGHT * 0.5],
+    outputRange: [0.4, 0.8],
+    extrapolate: 'clamp',
+  });
+  const titleTranslateY = scrollY.interpolate({
+    inputRange: [0, HERO_HEIGHT * 0.5],
+    outputRange: [0, -30],
+    extrapolate: 'clamp',
+  });
+  const backBtnOpacity = scrollY.interpolate({
+    inputRange: [0, 100],
+    outputRange: [1, 0.9],
+    extrapolate: 'clamp',
+  });
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -60,76 +152,159 @@ export default function PharmacyDetailScreen() {
 
   if (!pharmacy) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.header}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.floatingHeader}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={22} color={Colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Pharmacie introuvable</Text>
+          <Text style={[styles.floatingTitle, { color: Colors.text }]}>Pharmacie introuvable</Text>
+          <View style={{ width: 40 }} />
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
-          <Ionicons name="arrow-back" size={22} color={Colors.text} />
-        </TouchableOpacity>
-        <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle} numberOfLines={1}>Details</Text>
-          <Text style={styles.headerSubtitle} numberOfLines={1}>{pharmacy.name}</Text>
-        </View>
-      </View>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
-        {/* Image */}
+      {/* Parallax Hero */}
+      <Animated.View
+        style={[
+          styles.heroContainer,
+          {
+            transform: [{ translateY: heroTranslateY }, { scale: heroScale }],
+          },
+        ]}
+      >
         {pharmacy.image ? (
-          <Image source={{ uri: pharmacy.image }} style={styles.image} resizeMode="cover" />
+          <Animated.Image
+            source={{ uri: pharmacy.image }}
+            style={[styles.heroImage, { opacity: heroOpacity }]}
+            resizeMode="cover"
+          />
         ) : (
-          <View style={styles.imagePlaceholder}>
-            <Ionicons name="medical" size={48} color={Colors.textMuted} />
+          <Animated.View style={[styles.heroPlaceholder, { opacity: heroOpacity }]}>
+            <View style={styles.heroPlaceholderBg} pointerEvents="none">
+              <Ionicons name="medical" size={80} color={Colors.primary} style={{ opacity: 0.08, position: 'absolute', top: 40, left: 30, transform: [{ rotate: '15deg' }] }} />
+              <Ionicons name="heart" size={50} color={Colors.primary} style={{ opacity: 0.06, position: 'absolute', top: 80, right: 40, transform: [{ rotate: '-10deg' }] }} />
+              <Ionicons name="fitness" size={60} color={Colors.primary} style={{ opacity: 0.05, position: 'absolute', bottom: 50, left: 60, transform: [{ rotate: '25deg' }] }} />
+              <Ionicons name="pulse" size={55} color={Colors.primary} style={{ opacity: 0.07, position: 'absolute', bottom: 40, right: 80, transform: [{ rotate: '8deg' }] }} />
+            </View>
+            <View style={styles.heroPlaceholderIcon}>
+              <Ionicons name="medical" size={44} color={Colors.primary} />
+            </View>
+          </Animated.View>
+        )}
+        {/* Google attribution */}
+        {pharmacy.image && (
+          <View style={styles.googleBadge}>
+            <Text style={styles.googleBadgeText}>Image générée par Google</Text>
           </View>
         )}
 
-        {/* Name + Status */}
-        <View style={styles.nameSection}>
-          <View style={styles.nameRow}>
-            <Text style={styles.name}>{pharmacy.name}</Text>
-            {pharmacy.is_on_duty && (
-              <View style={styles.onDutyBadge}>
-                <View style={styles.onDutyDot} />
-                <Text style={styles.onDutyText}>De garde</Text>
-              </View>
-            )}
-          </View>
-          <View style={styles.locationRow}>
-            <Ionicons name="location" size={16} color={Colors.primary} />
-            <Text style={styles.locationText}>
-              {pharmacy.zone || '—'} • {pharmacy.city || '—'}
+        {/* Dark gradient overlay */}
+        <Animated.View style={[styles.heroOverlay, { opacity: overlayOpacity }]} />
+
+        {/* Hero content */}
+        <Animated.View
+          style={[
+            styles.heroContent,
+            { paddingBottom: 24, transform: [{ translateY: titleTranslateY }] },
+          ]}
+        >
+          {isOnDuty && (
+            <View style={styles.heroBadge}>
+              <Ionicons name="moon" size={12} color="#FFFFFF" />
+              <Text style={styles.heroBadgeText}>DE GARDE</Text>
+            </View>
+          )}
+          <Text style={styles.heroName} numberOfLines={2}>{pharmacy.name}</Text>
+          <View style={styles.heroLocationRow}>
+            <Ionicons name="location" size={15} color="rgba(255,255,255,0.85)" />
+            <Text style={styles.heroLocationText}>
+              {pharmacy.zone || '—'}, {pharmacy.city || '—'}
             </Text>
+          </View>
+        </Animated.View>
+      </Animated.View>
+
+      {/* Floating back button */}
+      <Animated.View style={[styles.floatingBackBtn, { top: insets.top + 8, opacity: backBtnOpacity }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
+          <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+        </TouchableOpacity>
+      </Animated.View>
+
+      {/* Scrollable content */}
+      <Animated.ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingTop: HERO_HEIGHT, paddingBottom: 40 }}
+        scrollEventThrottle={16}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: true }
+        )}
+      >
+        <View style={styles.scrollContent}>
+        {/* On duty banner */}
+        {isOnDuty && (
+          <View style={styles.onDutyBanner}>
+            <View style={styles.onDutyBannerDot} />
+            <Ionicons name="moon" size={14} color={Colors.accent} />
+            <Text style={styles.onDutyBannerText}>Pharmacie de garde</Text>
+          </View>
+        )}
+
+        {/* Call Button - Full Width */}
+        <View style={styles.actionsContainer}>
+          <TouchableOpacity
+            style={styles.callBtn}
+            activeOpacity={0.8}
+            onPress={() => pharmacy.phones?.[0] && handleCall(pharmacy.phones[0])}
+          >
+            <Ionicons name="call" size={20} color="#FFFFFF" />
+            <Text style={styles.callBtnText}>Appeler</Text>
+            {pharmacy.phones?.[0] && (
+              <Text style={styles.callBtnPhone}>{pharmacy.phones[0]}</Text>
+            )}
+          </TouchableOpacity>
+
+          {/* Secondary actions */}
+          <View style={styles.actionsGrid}>
+            <TouchableOpacity
+              style={styles.actionBtn}
+              activeOpacity={0.7}
+              onPress={handleDirections}
+              disabled={!pharmacy.location}
+            >
+              <View style={[styles.actionCircle, !pharmacy.location && styles.actionCircleDisabled]}>
+                <Ionicons name="navigate" size={20} color={Colors.primary} />
+              </View>
+              <Text style={styles.actionLabel}>Itinéraire</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionBtn}
+              activeOpacity={0.7}
+              onPress={handleShare}
+            >
+              <View style={styles.actionCircle}>
+                <Ionicons name="share-outline" size={20} color={Colors.primary} />
+              </View>
+              <Text style={styles.actionLabel}>Partager</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
-        {/* Mini Map */}
-        {pharmacy.location && pharmacy.location.latitude && pharmacy.location.longitude && (
+        {/* Map Section */}
+        {pharmacy.location && pharmacy.location.latitude != null && pharmacy.location.longitude != null && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Localisation</Text>
+            <Text style={styles.sectionLabel}>LOCALISATION</Text>
             <TouchableOpacity
-              style={styles.mapContainer}
+              style={styles.mapCard}
               activeOpacity={0.8}
-              onPress={() => {
-                const { latitude, longitude } = pharmacy.location!;
-                const label = encodeURIComponent(pharmacy.name);
-                const url = Platform.select({
-                  ios: `maps:0,0?q=${label}@${latitude},${longitude}`,
-                  android: `geo:${latitude},${longitude}?q=${latitude},${longitude}(${label})`,
-                  default: `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`,
-                });
-                Linking.openURL(url!);
-              }}
+              onPress={handleDirections}
             >
               <View style={styles.mapPreview}>
                 <View style={styles.mapGrid}>
@@ -139,7 +314,7 @@ export default function PharmacyDetailScreen() {
                   <View style={[styles.mapGridLine, { transform: [{ rotate: '135deg' }] }]} />
                 </View>
                 <View style={styles.mapPin}>
-                  <Ionicons name="location" size={24} color={Colors.surface} />
+                  <Ionicons name="location" size={22} color={'#FFFFFF'} />
                 </View>
                 <Text style={styles.mapCoords}>
                   {pharmacy.location.latitude.toFixed(4)}, {pharmacy.location.longitude.toFixed(4)}
@@ -147,10 +322,10 @@ export default function PharmacyDetailScreen() {
               </View>
               <View style={styles.mapFooter}>
                 <View style={styles.mapFooterLeft}>
-                  <Ionicons name="navigate" size={16} color={Colors.primary} />
+                  <Ionicons name="navigate" size={14} color={Colors.primary} />
                   <Text style={styles.mapFooterText}>Ouvrir dans Maps</Text>
                 </View>
-                <Ionicons name="open-outline" size={16} color={Colors.primary} />
+                <Ionicons name="open-outline" size={14} color={Colors.textMuted} />
               </View>
             </TouchableOpacity>
           </View>
@@ -159,7 +334,7 @@ export default function PharmacyDetailScreen() {
         {/* Phones */}
         {pharmacy.phones && pharmacy.phones.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Telephones</Text>
+            <Text style={styles.sectionLabel}>TELEPHONES</Text>
             <View style={styles.phonesList}>
               {pharmacy.phones.map((phone, idx) => (
                 <TouchableOpacity
@@ -168,11 +343,11 @@ export default function PharmacyDetailScreen() {
                   onPress={() => handleCall(phone)}
                   activeOpacity={0.7}
                 >
-                  <View style={styles.phoneIcon}>
-                    <Ionicons name="call" size={18} color={Colors.primary} />
+                  <View style={styles.phoneIconContainer}>
+                    <Ionicons name="call" size={16} color={Colors.primary} />
                   </View>
                   <View style={styles.phoneInfo}>
-                    <Text style={styles.phoneLabel}>Numero {idx + 1}</Text>
+                    <Text style={styles.phoneLabel}>Ligne {idx + 1}</Text>
                     <Text style={styles.phoneNumber}>{phone}</Text>
                   </View>
                   <View style={styles.phoneAction}>
@@ -187,25 +362,25 @@ export default function PharmacyDetailScreen() {
         {/* Doctor */}
         {pharmacy.doctor_name ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Pharmacien</Text>
+            <Text style={styles.sectionLabel}>PHARMACIEN</Text>
             <View style={styles.infoCard}>
-              <View style={styles.infoIcon}>
+              <View style={styles.doctorAvatar}>
                 <Ionicons name="person" size={18} color={Colors.primary} />
               </View>
-              <Text style={styles.infoText}>{pharmacy.doctor_name}</Text>
+              <Text style={styles.doctorName}>{pharmacy.doctor_name}</Text>
             </View>
           </View>
         ) : null}
 
         {/* Assurances */}
-        {pharmacy.assurances && pharmacy.assurances.length > 0 && (
+        {assuranceNames.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Assurances acceptees</Text>
+            <Text style={styles.sectionLabel}>ASSURANCES ACCEPTEES</Text>
             <View style={styles.tagsList}>
-              {pharmacy.assurances.map((a, idx) => (
+              {assuranceNames.map((name, idx) => (
                 <View key={idx} style={styles.tag}>
                   <Ionicons name="shield-checkmark" size={13} color={Colors.primary} />
-                  <Text style={styles.tagText}>{a}</Text>
+                  <Text style={styles.tagText}>{name}</Text>
                 </View>
               ))}
             </View>
@@ -215,14 +390,23 @@ export default function PharmacyDetailScreen() {
         {/* Description */}
         {pharmacy.description ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Description</Text>
+            <Text style={styles.sectionLabel}>DESCRIPTION</Text>
             <View style={styles.descCard}>
               <Text style={styles.descText}>{pharmacy.description}</Text>
             </View>
           </View>
         ) : null}
-      </ScrollView>
-    </SafeAreaView>
+
+        {/* Banner Ad */}
+        <View style={styles.adContainer}>
+          <BannerAd
+            unitId={BANNER_AD_ID}
+            size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
+          />
+        </View>
+        </View>
+      </Animated.ScrollView>
+    </View>
   );
 }
 
@@ -231,121 +415,252 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  scrollContent: {
+    backgroundColor: Colors.background,
+    minHeight: '100%',
+  },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: Colors.background,
   },
-  header: {
+
+  // Floating header (not found state)
+  floatingHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
-    paddingVertical: 14,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    paddingVertical: 12,
+  },
+  floatingTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+
+  // Floating back button
+  floatingBackBtn: {
+    position: 'absolute',
+    left: Spacing.lg,
+    zIndex: 10,
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.background,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerInfo: {
-    flex: 1,
+
+  // Hero parallax
+  heroContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: HERO_HEIGHT,
+    overflow: 'hidden',
+    backgroundColor: Colors.primaryLight,
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: Colors.text,
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: Colors.textMuted,
-    marginTop: 1,
-  },
-  image: {
+  heroImage: {
     width: '100%',
-    height: 200,
-    backgroundColor: Colors.borderLight,
+    height: '100%',
   },
-  imagePlaceholder: {
+  heroPlaceholder: {
     width: '100%',
-    height: 160,
+    height: '100%',
     backgroundColor: Colors.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  nameSection: {
-    backgroundColor: Colors.surface,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.xl,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+  heroPlaceholderBg: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
   },
-  nameRow: {
+  heroPlaceholderIcon: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: 'rgba(255,255,255,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  heroOverlay: {
+    ...(StyleSheet.absoluteFill as any),
+    backgroundColor: '#000',
+  },
+  googleBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    zIndex: 5,
+  },
+  googleBadgeText: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.8)',
+    fontWeight: '500',
+  },
+  heroContent: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: Spacing.xl,
+  },
+  heroBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 8,
+    alignSelf: 'flex-start',
+    gap: 5,
+    backgroundColor: Colors.accent,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.full,
+    marginBottom: 10,
+    ...Shadows.md,
   },
-  name: {
-    fontSize: 22,
+  heroBadgeText: {
+    fontSize: 11,
     fontWeight: '800',
-    color: Colors.text,
-    flexShrink: 1,
-    letterSpacing: -0.3,
+    color: '#FFFFFF',
+    letterSpacing: 0.8,
   },
-  onDutyBadge: {
+  heroName: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.3,
+    marginBottom: 6,
+  },
+  heroLocationRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: '#D1FAE5',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.full,
   },
-  onDutyDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#059669',
+  heroLocationText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.85)',
   },
-  onDutyText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#059669',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  locationRow: {
+
+  // On duty banner
+  onDutyBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-  },
-  locationText: {
-    fontSize: 15,
-    color: Colors.textSecondary,
-    fontWeight: '500',
-  },
-  section: {
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.xl,
-  },
-  mapContainer: {
+    gap: 8,
+    backgroundColor: Colors.accentLight,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: Spacing.xl,
+    marginTop: Spacing.lg,
     borderRadius: BorderRadius.md,
+  },
+  onDutyBannerDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.accent,
+  },
+  onDutyBannerText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.accentContainer,
+  },
+
+  // Action buttons grid
+  actionsContainer: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.sm,
+    gap: 12,
+  },
+  callBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.xl,
+    paddingVertical: 16,
+    ...Shadows.md,
+  },
+  callBtnText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  callBtnPhone: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  actionsGrid: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    borderColor: 'rgba(189,202,186,0.2)',
+    ...Shadows.sm,
+  },
+  actionCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  actionCircleDisabled: {
+    backgroundColor: Colors.surfaceContainerHigh,
+  },
+  actionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+
+  // Sections
+  section: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.xxl,
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textMuted,
+    letterSpacing: 0.6,
+    marginBottom: 12,
+  },
+
+  // Map
+  mapCard: {
+    borderRadius: BorderRadius.lg,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
+    borderColor: 'rgba(189,202,186,0.2)',
+    backgroundColor: Colors.surfaceContainerLowest,
+    ...Shadows.sm,
   },
   mapPreview: {
-    height: 160,
-    backgroundColor: Colors.primaryLight,
+    height: 150,
+    backgroundColor: Colors.surfaceContainerLow,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
@@ -356,7 +671,7 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    opacity: 0.15,
+    opacity: 0.08,
   },
   mapGridLine: {
     position: 'absolute',
@@ -365,32 +680,28 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
   },
   mapPin: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.primary,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.primaryContainer,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: Colors.shadow,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 4,
+    ...Shadows.md,
     marginBottom: 6,
   },
   mapCoords: {
     fontSize: 12,
     fontWeight: '600',
-    color: Colors.primaryDark,
+    color: Colors.textMuted,
   },
   mapFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: Colors.border,
+    borderTopColor: Colors.borderLight,
   },
   mapFooterLeft: {
     flexDirection: 'row',
@@ -402,32 +713,27 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.primary,
   },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 10,
-  },
+
+  // Phones
   phonesList: {
     gap: 8,
   },
   phoneCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
+    gap: 14,
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: BorderRadius.lg,
     padding: 14,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: 'rgba(189,202,186,0.2)',
+    ...Shadows.sm,
   },
-  phoneIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.primaryLight,
+  phoneIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.surfaceContainerLow,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -435,42 +741,49 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   phoneLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: Colors.textMuted,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
   phoneNumber: {
     fontSize: 16,
     fontWeight: '700',
     color: Colors.text,
-    marginTop: 1,
+    marginTop: 2,
   },
   phoneAction: {
     marginLeft: 8,
   },
+
+  // Doctor
   infoCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
+    gap: 14,
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: BorderRadius.lg,
     padding: 14,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: 'rgba(189,202,186,0.2)',
+    ...Shadows.sm,
   },
-  infoIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: BorderRadius.sm,
-    backgroundColor: Colors.primaryLight,
+  doctorAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.surfaceContainerLow,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  infoText: {
+  doctorName: {
     fontSize: 16,
     fontWeight: '600',
     color: Colors.text,
   },
+
+  // Tags
   tagsList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -479,27 +792,37 @@ const styles = StyleSheet.create({
   tag: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    gap: 6,
+    backgroundColor: Colors.surfaceContainerLowest,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(189,202,186,0.2)',
   },
   tagText: {
     fontSize: 13,
     fontWeight: '600',
-    color: Colors.primaryDark,
+    color: Colors.text,
   },
+
+  // Description
   descCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
-    padding: 14,
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: BorderRadius.lg,
+    padding: 16,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: 'rgba(189,202,186,0.2)',
+    ...Shadows.sm,
   },
   descText: {
     fontSize: 14,
     color: Colors.textSecondary,
     lineHeight: 22,
+  },
+  adContainer: {
+    alignItems: 'center',
+    paddingTop: Spacing.xxl,
+    paddingBottom: Spacing.md,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, Linking, Platform,
@@ -10,7 +10,9 @@ import { db } from '@/hooks/firebaseConfig';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Colors, Spacing, BorderRadius } from '@/constants/theme';
+import { Colors, Spacing, BorderRadius, Shadows } from '@/constants/theme';
+import { BannerAd, BannerAdSize } from 'react-native-google-mobile-ads';
+import { BANNER_AD_ID, showInterstitial } from '@/hooks/ads';
 
 interface Pharmacy {
   id: string;
@@ -23,6 +25,13 @@ interface Pharmacy {
   doctor_name?: string;
   assurances?: string[];
   location?: { latitude: number; longitude: number };
+}
+
+function toMs(ts: any): number {
+  if (!ts) return 0;
+  if (ts.toDate) return ts.toDate().getTime();
+  if (ts.seconds) return ts.seconds * 1000;
+  return new Date(ts).getTime();
 }
 
 function getDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -48,12 +57,31 @@ export default function AnnuaireScreen() {
   const [nearbyPharmacies, setNearbyPharmacies] = useState<(Pharmacy & { distance: number })[]>([]);
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [onDutyIds, setOnDutyIds] = useState<Set<string>>(new Set());
+  const clickCount = useRef(0);
 
   const fetchPharmacies = async () => {
     try {
-      const snap = await getDocs(collection(db, 'pharmacies'));
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Pharmacy));
+      const [pharmaSnap, gardeSnap] = await Promise.all([
+        getDocs(collection(db, 'pharmacies')),
+        getDocs(collection(db, 'pharmacies_de_garde')),
+      ]);
+
+      const data = pharmaSnap.docs.map(d => ({ id: d.id, ...d.data() } as Pharmacy));
       setPharmacies(data.sort((a, b) => a.name.localeCompare(b.name)));
+
+      // Extraire les pharmacyIds actuellement de garde
+      const now = Date.now();
+      const activeIds = new Set<string>();
+      gardeSnap.docs.forEach(d => {
+        const raw = d.data();
+        if (toMs(raw.startDate) <= now && now <= toMs(raw.endDate)) {
+          (raw.pharmacies || []).forEach((p: any) => {
+            if (p.pharmacyId) activeIds.add(p.pharmacyId);
+          });
+        }
+      });
+      setOnDutyIds(activeIds);
     } catch (e) {
       console.error('Erreur chargement pharmacies:', e);
     } finally {
@@ -81,7 +109,7 @@ export default function AnnuaireScreen() {
     );
   });
 
-  const onDutyCount = pharmacies.filter(p => p.is_on_duty).length;
+  const onDutyCount = onDutyIds.size;
 
   const handleCall = (phone: string) => {
     const cleaned = phone.replace(/\s/g, '');
@@ -137,8 +165,10 @@ export default function AnnuaireScreen() {
     return (
       <View style={styles.centered}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={styles.loadingText}>Chargement des pharmacies...</Text>
+          <View style={styles.loadingIcon}>
+            <Ionicons name="medical" size={28} color={Colors.primary} />
+          </View>
+          <Text style={styles.loadingText}>Chargement...</Text>
         </View>
       </View>
     );
@@ -148,43 +178,49 @@ export default function AnnuaireScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
+        {/* Background decorative icons */}
+        <View style={styles.headerBgIcons} pointerEvents="none">
+          <Ionicons name="medical" size={44} color={Colors.primary} style={[styles.bgIcon, { top: -4, right: 30, transform: [{ rotate: '15deg' }] }]} />
+          <Ionicons name="heart" size={28} color={Colors.primary} style={[styles.bgIcon, { top: 8, right: 90, transform: [{ rotate: '-10deg' }] }]} />
+          <Ionicons name="fitness" size={32} color={Colors.primary} style={[styles.bgIcon, { bottom: 12, right: 10, transform: [{ rotate: '25deg' }] }]} />
+          <Ionicons name="bandage" size={26} color={Colors.primary} style={[styles.bgIcon, { bottom: 4, right: 65, transform: [{ rotate: '-20deg' }] }]} />
+          <Ionicons name="pulse" size={36} color={Colors.primary} style={[styles.bgIcon, { top: 2, right: 140, transform: [{ rotate: '8deg' }] }]} />
+        </View>
+
         <View style={styles.headerTop}>
           <View>
-            <Text style={styles.title}>Annuaire</Text>
-            <Text style={styles.subtitle}>Pharmacies</Text>
+            <Text style={styles.labelCaps}>ANNUAIRE</Text>
+            <Text style={styles.title}>Pharmacies</Text>
           </View>
           <View style={styles.statsRow}>
             <View style={styles.statBadge}>
-              <Ionicons name="medical" size={14} color={Colors.primary} />
-              <Text style={styles.statText}>{pharmacies.length}</Text>
+              <Text style={styles.statNumber}>{pharmacies.length}</Text>
             </View>
             {onDutyCount > 0 && (
-              <View style={[styles.statBadge, styles.statBadgeActive]}>
+              <View style={styles.statBadgeGarde}>
                 <View style={styles.liveDot} />
-                <Text style={[styles.statText, { color: '#059669' }]}>{onDutyCount} de garde</Text>
+                <Text style={styles.statTextGarde}>{onDutyCount}</Text>
               </View>
             )}
           </View>
         </View>
 
         {/* Search */}
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Ionicons name="search" size={18} color={Colors.textMuted} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Rechercher par nom, commune ou ville..."
-              placeholderTextColor={Colors.textMuted}
-              value={search}
-              onChangeText={setSearch}
-              returnKeyType="search"
-            />
-            {search.length > 0 && (
-              <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
-              </TouchableOpacity>
-            )}
-          </View>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={18} color={Colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Nom, commune ou ville..."
+            placeholderTextColor={Colors.textMuted}
+            value={search}
+            onChangeText={setSearch}
+            returnKeyType="search"
+          />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
+            </TouchableOpacity>
+          )}
         </View>
 
         {search.length > 0 && (
@@ -204,38 +240,46 @@ export default function AnnuaireScreen() {
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.card}
-            activeOpacity={0.6}
-            onPress={() => router.push(`/pharmacieapp/pharmacy/${item.id}`)}
+            activeOpacity={0.7}
+            onPress={() => {
+              clickCount.current += 1;
+              if (clickCount.current % 3 === 0) {
+                showInterstitial();
+              }
+              router.push(`/pharmacieapp/pharmacy/${item.id}`);
+            }}
           >
-            <View style={[styles.cardIcon, item.is_on_duty && styles.cardIconActive]}>
+            <View style={[styles.cardIcon, onDutyIds.has(item.id) && styles.cardIconActive]}>
               <Ionicons
                 name="medical"
                 size={20}
-                color={item.is_on_duty ? Colors.surface : Colors.primary}
+                color={onDutyIds.has(item.id) ? '#FFFFFF' : Colors.primary}
               />
             </View>
             <View style={styles.cardInfo}>
               <View style={styles.nameRow}>
-                <Text style={styles.pharmacyName} numberOfLines={1}>{item.name}</Text>
-                {item.is_on_duty && (
+                {onDutyIds.has(item.id) && (
                   <View style={styles.onDutyBadge}>
-                    <Text style={styles.onDutyText}>De garde</Text>
+                    <View style={styles.onDutyDot} />
+                    <Text style={styles.onDutyText}>GARDE</Text>
                   </View>
                 )}
+                <Text style={styles.pharmacyName} numberOfLines={1}>{item.name}</Text>
               </View>
-              <Text style={styles.pharmacyLocation} numberOfLines={1}>
-                {item.zone || '—'} • {item.city || '—'}
-              </Text>
+              <View style={styles.locationRow}>
+                <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
+                <Text style={styles.pharmacyLocation} numberOfLines={1}>
+                  {item.zone || '—'} • {item.city || '—'}
+                </Text>
+              </View>
             </View>
-            <View style={styles.chevronContainer}>
-              <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-            </View>
+            <Ionicons name="chevron-forward" size={18} color={Colors.borderLight} />
           </TouchableOpacity>
         )}
         ListEmptyComponent={
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
-              <Ionicons name="medical-outline" size={40} color={Colors.textMuted} />
+              <Ionicons name="medical-outline" size={36} color={Colors.primary} />
             </View>
             <Text style={styles.emptyTitle}>Aucune pharmacie trouvee</Text>
             <Text style={styles.emptySubtitle}>
@@ -243,20 +287,28 @@ export default function AnnuaireScreen() {
             </Text>
           </View>
         }
-        contentContainerStyle={{ paddingBottom: 20 }}
+        ListFooterComponent={
+          <View style={styles.adContainer}>
+            <BannerAd unitId={BANNER_AD_ID} size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER} />
+          </View>
+        }
+        contentContainerStyle={{ paddingTop: Spacing.sm, paddingBottom: 100 }}
         showsVerticalScrollIndicator={false}
       />
 
-      {/* Floating Locate Button */}
+      {/* FAB */}
       <TouchableOpacity
         style={styles.fab}
         onPress={handleLocate}
-        activeOpacity={0.8}
+        activeOpacity={0.85}
       >
-        <Ionicons name="locate" size={24} color={Colors.surface} />
+        <View style={styles.fabIcon}>
+          <Ionicons name="locate" size={18} color={'#FFFFFF'} />
+        </View>
+        <Text style={styles.fabText}>Pharmacie proche</Text>
       </TouchableOpacity>
 
-      {/* Nearby Pharmacies Modal */}
+      {/* Nearby Modal */}
       <Modal
         visible={nearbyModalVisible}
         animationType="slide"
@@ -268,10 +320,11 @@ export default function AnnuaireScreen() {
             <View style={styles.modalDragHandle} />
             <View style={styles.modalHeaderRow}>
               <View>
+                <Text style={styles.modalLabelCaps}>A PROXIMITE</Text>
                 <Text style={styles.modalTitle}>Pharmacies proches</Text>
                 {!locating && !locationError && nearbyPharmacies.length > 0 && (
                   <Text style={styles.modalSubtitle}>
-                    {nearbyPharmacies.length} pharmacie{nearbyPharmacies.length > 1 ? 's' : ''} trouvee{nearbyPharmacies.length > 1 ? 's' : ''}
+                    {nearbyPharmacies.length} resultat{nearbyPharmacies.length > 1 ? 's' : ''}
                   </Text>
                 )}
               </View>
@@ -279,22 +332,25 @@ export default function AnnuaireScreen() {
                 onPress={() => setNearbyModalVisible(false)}
                 style={styles.modalCloseBtn}
               >
-                <Ionicons name="close" size={22} color={Colors.text} />
+                <Ionicons name="close" size={20} color={Colors.text} />
               </TouchableOpacity>
             </View>
           </View>
 
           {locating && (
             <View style={styles.modalCentered}>
-              <ActivityIndicator size="large" color={Colors.primary} />
-              <Text style={styles.modalLoadingText}>Recherche de votre position...</Text>
+              <View style={styles.locatingRing}>
+                <ActivityIndicator size="large" color={Colors.primary} />
+              </View>
+              <Text style={styles.modalLoadingText}>Recherche en cours...</Text>
+              <Text style={styles.modalLoadingHint}>Activation du GPS</Text>
             </View>
           )}
 
           {locationError && (
             <View style={styles.modalCentered}>
               <View style={styles.modalErrorIcon}>
-                <Ionicons name="location-outline" size={40} color={Colors.error} />
+                <Ionicons name="location-outline" size={36} color={Colors.error} />
               </View>
               <Text style={styles.modalErrorTitle}>Localisation impossible</Text>
               <Text style={styles.modalErrorText}>{locationError}</Text>
@@ -303,6 +359,7 @@ export default function AnnuaireScreen() {
                 onPress={handleLocate}
                 activeOpacity={0.7}
               >
+                <Ionicons name="refresh" size={16} color="#FFFFFF" />
                 <Text style={styles.modalRetryText}>Reessayer</Text>
               </TouchableOpacity>
             </View>
@@ -314,34 +371,38 @@ export default function AnnuaireScreen() {
               keyExtractor={item => item.id}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={styles.card}
-                  activeOpacity={0.6}
+                  style={styles.nearbyCard}
+                  activeOpacity={0.7}
                   onPress={() => {
                     setNearbyModalVisible(false);
                     setTimeout(() => router.push(`/pharmacieapp/pharmacy/${item.id}`), 300);
                   }}
                 >
-                  <View style={[styles.cardIcon, item.is_on_duty && styles.cardIconActive]}>
+                  <View style={[styles.cardIcon, onDutyIds.has(item.id) && styles.cardIconActive]}>
                     <Ionicons
                       name="medical"
                       size={20}
-                      color={item.is_on_duty ? Colors.surface : Colors.primary}
+                      color={onDutyIds.has(item.id) ? '#FFFFFF' : Colors.primary}
                     />
                   </View>
                   <View style={styles.cardInfo}>
                     <View style={styles.nameRow}>
-                      <Text style={styles.pharmacyName} numberOfLines={1}>{item.name}</Text>
-                      {item.is_on_duty && (
+                      {onDutyIds.has(item.id) && (
                         <View style={styles.onDutyBadge}>
-                          <Text style={styles.onDutyText}>De garde</Text>
+                          <View style={styles.onDutyDot} />
+                          <Text style={styles.onDutyText}>GARDE</Text>
                         </View>
                       )}
+                      <Text style={styles.pharmacyName} numberOfLines={1}>{item.name}</Text>
                     </View>
-                    <Text style={styles.pharmacyLocation} numberOfLines={1}>
-                      {item.zone || '—'} • {item.city || '—'}
-                    </Text>
-                    <View style={styles.distanceRow}>
-                      <Ionicons name="navigate-outline" size={12} color={Colors.primary} />
+                    <View style={styles.locationRow}>
+                      <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
+                      <Text style={styles.pharmacyLocation} numberOfLines={1}>
+                        {item.zone || '—'} • {item.city || '—'}
+                      </Text>
+                    </View>
+                    <View style={styles.distanceBadge}>
+                      <Ionicons name="navigate" size={11} color={Colors.primary} />
                       <Text style={styles.distanceText}>
                         {item.distance < 1
                           ? `${Math.round(item.distance * 1000)} m`
@@ -349,15 +410,13 @@ export default function AnnuaireScreen() {
                       </Text>
                     </View>
                   </View>
-                  <View style={styles.chevronContainer}>
-                    <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={Colors.borderLight} />
                 </TouchableOpacity>
               )}
               ListEmptyComponent={
                 <View style={styles.empty}>
                   <View style={styles.emptyIcon}>
-                    <Ionicons name="location-outline" size={40} color={Colors.textMuted} />
+                    <Ionicons name="location-outline" size={36} color={Colors.primary} />
                   </View>
                   <Text style={styles.emptyTitle}>Aucune pharmacie a proximite</Text>
                   <Text style={styles.emptySubtitle}>
@@ -365,7 +424,7 @@ export default function AnnuaireScreen() {
                   </Text>
                 </View>
               }
-              contentContainerStyle={{ paddingBottom: 20 }}
+              contentContainerStyle={{ paddingTop: Spacing.sm, paddingBottom: 20 }}
               showsVerticalScrollIndicator={false}
             />
           )}
@@ -388,19 +447,43 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     alignItems: 'center',
-    gap: 12,
+    gap: 16,
+  },
+  loadingIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   loadingText: {
     fontSize: 14,
     color: Colors.textMuted,
+    fontWeight: '500',
   },
+
+  // Header
   header: {
-    backgroundColor: Colors.surface,
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
     paddingBottom: Spacing.lg,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: 'rgba(0,107,47,0.1)',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  headerBgIcons: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  bgIcon: {
+    position: 'absolute',
+    opacity: 0.06,
   },
   headerTop: {
     flexDirection: 'row',
@@ -408,59 +491,65 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: Spacing.lg,
   },
+  labelCaps: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    color: Colors.primary,
+    marginBottom: 2,
+  },
   title: {
     fontSize: 28,
-    fontWeight: '800',
-    color: Colors.text,
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: Colors.primary,
-    fontWeight: '600',
-    marginTop: 2,
+    fontWeight: '700',
+    color: Colors.primaryDark,
+    letterSpacing: -0.3,
   },
   statsRow: {
     flexDirection: 'row',
     gap: 8,
-    marginTop: 4,
+    marginTop: 8,
   },
   statBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    backgroundColor: 'rgba(0,107,47,0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: BorderRadius.full,
   },
-  statBadgeActive: {
-    backgroundColor: '#D1FAE5',
-  },
-  statText: {
-    fontSize: 12,
+  statNumber: {
+    fontSize: 13,
     fontWeight: '700',
     color: Colors.primaryDark,
   },
+  statBadgeGarde: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.accentLight,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.full,
+  },
   liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#059669',
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: Colors.accent,
   },
-  searchContainer: {
-    marginBottom: 4,
+  statTextGarde: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.accentContainer,
   },
+
+  // Search
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     paddingHorizontal: 14,
     paddingVertical: Platform.OS === 'ios' ? 12 : 8,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: 'rgba(255,255,255,0.7)',
   },
   searchInput: {
     flex: 1,
@@ -470,33 +559,40 @@ const styles = StyleSheet.create({
   resultCount: {
     fontSize: 12,
     color: Colors.textMuted,
-    marginTop: 8,
-    marginLeft: 4,
+    fontWeight: '600',
+    marginTop: 10,
+    letterSpacing: 0.3,
   },
+
+  // Cards
   card: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     paddingVertical: 14,
     paddingHorizontal: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderLight,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.sm,
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(189,202,186,0.15)',
+    ...Shadows.sm,
   },
   cardIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.md,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: Colors.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
   },
   cardIconActive: {
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.primaryContainer,
   },
   cardInfo: {
     flex: 1,
-    gap: 2,
+    gap: 4,
   },
   nameRow: {
     flexDirection: 'row',
@@ -510,40 +606,48 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   onDutyBadge: {
-    backgroundColor: '#D1FAE5',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.accent,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: BorderRadius.full,
   },
+  onDutyDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
+  },
   onDutyText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#059669',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.8,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   pharmacyLocation: {
     fontSize: 13,
-    color: Colors.textSecondary,
+    color: Colors.textMuted,
+    flexShrink: 1,
   },
-  chevronContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+
+  // Empty
   empty: {
     alignItems: 'center',
     paddingVertical: 80,
-    gap: 8,
+    gap: 10,
   },
   emptyIcon: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: Colors.borderLight,
+    backgroundColor: Colors.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
@@ -556,40 +660,58 @@ const styles = StyleSheet.create({
   emptySubtitle: {
     fontSize: 13,
     color: Colors.textMuted,
+    textAlign: 'center',
+    paddingHorizontal: Spacing.xxxl,
   },
+
+  // FAB
   fab: {
     position: 'absolute',
-    right: Spacing.lg,
-    bottom: Spacing.lg,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.primary,
+    right: Spacing.xl,
+    bottom: Spacing.xl,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.primaryContainer,
+    paddingLeft: 14,
+    paddingRight: 20,
+    paddingVertical: 14,
+    borderRadius: BorderRadius.full,
+    ...Shadows.lg,
+    shadowColor: Colors.primary,
+  },
+  fabIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: Colors.shadow,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
   },
+  fabText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+
+  // Modal
   modalContainer: {
     flex: 1,
     backgroundColor: Colors.background,
   },
   modalHeader: {
-    backgroundColor: Colors.surface,
-    paddingHorizontal: Spacing.lg,
+    backgroundColor: Colors.surfaceContainerLowest,
+    paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.lg,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: Colors.borderLight,
     alignItems: 'center',
   },
   modalDragHandle: {
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: Colors.border,
+    backgroundColor: Colors.surfaceContainerHigh,
     marginTop: Spacing.sm,
     marginBottom: Spacing.md,
   },
@@ -599,23 +721,30 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     width: '100%',
   },
+  modalLabelCaps: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    color: Colors.primary,
+    marginBottom: 2,
+  },
   modalTitle: {
     fontSize: 22,
-    fontWeight: '800',
-    color: Colors.text,
-    letterSpacing: -0.3,
+    fontWeight: '700',
+    color: Colors.primaryDark,
+    letterSpacing: -0.2,
   },
   modalSubtitle: {
-    fontSize: 14,
-    color: Colors.primary,
-    fontWeight: '600',
-    marginTop: 2,
+    fontSize: 13,
+    color: Colors.textMuted,
+    fontWeight: '500',
+    marginTop: 3,
   },
   modalCloseBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.surfaceContainer,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -626,15 +755,29 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: Spacing.xxxl,
   },
+  locatingRing: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   modalLoadingText: {
-    fontSize: 14,
+    fontSize: 16,
+    color: Colors.text,
+    fontWeight: '600',
+  },
+  modalLoadingHint: {
+    fontSize: 13,
     color: Colors.textMuted,
   },
   modalErrorIcon: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: '#FEE2E2',
+    backgroundColor: Colors.errorContainer,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
@@ -648,28 +791,57 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.textMuted,
     textAlign: 'center',
+    lineHeight: 18,
   },
   modalRetryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     backgroundColor: Colors.primary,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: BorderRadius.sm,
-    marginTop: 8,
+    borderRadius: BorderRadius.full,
+    marginTop: 12,
   },
   modalRetryText: {
     fontSize: 14,
     fontWeight: '700',
-    color: Colors.surface,
+    color: '#FFFFFF',
   },
-  distanceRow: {
+
+  // Nearby card
+  nearbyCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.lg,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.sm,
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(189,202,186,0.15)',
+    ...Shadows.sm,
+  },
+  distanceBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+    alignSelf: 'flex-start',
     marginTop: 2,
   },
   distanceText: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
     color: Colors.primary,
+  },
+  adContainer: {
+    alignItems: 'center',
+    paddingVertical: Spacing.lg,
   },
 });

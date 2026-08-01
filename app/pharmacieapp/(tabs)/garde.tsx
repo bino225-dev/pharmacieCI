@@ -10,7 +10,9 @@ import { db } from '@/hooks/firebaseConfig';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius } from '@/constants/theme';
+import { Colors, Spacing, BorderRadius, Shadows } from '@/constants/theme';
+import { BannerAd, BannerAdSize } from 'react-native-google-mobile-ads';
+import { BANNER_AD_ID } from '@/hooks/ads';
 
 interface City {
   id: string;
@@ -103,11 +105,9 @@ export default function GardeScreen() {
       });
       const { latitude: userLat, longitude: userLon } = userLocation.coords;
 
-      // 1. Fetch toutes les gardes
       const gardeSnap = await getDocs(collection(db, 'pharmacies_de_garde'));
       const now = Date.now();
 
-      // 2. Filtrer les gardes actives et extraire les pharmacyIds uniques
       const activePharmacyIds = new Set<string>();
       const pharmacyMeta = new Map<string, { name: string; zone: string; phones: string[] }>();
 
@@ -135,12 +135,10 @@ export default function GardeScreen() {
         return;
       }
 
-      // 3. Fetch les coordonnees depuis la collection pharmacies
       const pharmacyDocs = await Promise.all(
         Array.from(activePharmacyIds).map(id => getDoc(doc(db, 'pharmacies', id)))
       );
 
-      // 4. Calculer les distances
       const withDistance: OnDutyPharmacy[] = [];
       pharmacyDocs.forEach(snap => {
         if (!snap.exists()) return;
@@ -182,8 +180,10 @@ export default function GardeScreen() {
     return (
       <View style={styles.centered}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={styles.loadingText}>Chargement des villes...</Text>
+          <View style={styles.loadingIcon}>
+            <Ionicons name="moon" size={28} color={Colors.accent} />
+          </View>
+          <Text style={styles.loadingText}>Chargement...</Text>
         </View>
       </View>
     );
@@ -193,14 +193,23 @@ export default function GardeScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
+        {/* Background decorative icons */}
+        <View style={styles.headerBgIcons} pointerEvents="none">
+          <Ionicons name="moon" size={40} color={Colors.accent} style={[styles.bgIcon, { top: -2, right: 25, transform: [{ rotate: '-12deg' }] }]} />
+          <Ionicons name="medical" size={30} color={Colors.accent} style={[styles.bgIcon, { top: 10, right: 85, transform: [{ rotate: '18deg' }] }]} />
+          <Ionicons name="time" size={34} color={Colors.accent} style={[styles.bgIcon, { bottom: 10, right: 8, transform: [{ rotate: '10deg' }] }]} />
+          <Ionicons name="shield-checkmark" size={26} color={Colors.accent} style={[styles.bgIcon, { bottom: 6, right: 60, transform: [{ rotate: '-15deg' }] }]} />
+          <Ionicons name="alarm" size={30} color={Colors.accent} style={[styles.bgIcon, { top: 0, right: 145, transform: [{ rotate: '22deg' }] }]} />
+        </View>
+
         <View style={styles.headerTop}>
           <View>
+            <Text style={styles.labelCaps}>PHARMACIES</Text>
             <Text style={styles.title}>De Garde</Text>
-            <Text style={styles.subtitle}>Pharmacies</Text>
           </View>
           <View style={styles.statBadge}>
-            <Ionicons name="location" size={14} color={Colors.primary} />
-            <Text style={styles.statText}>{cities.length} villes</Text>
+            <Ionicons name="business-outline" size={14} color={Colors.accent} />
+            <Text style={styles.statText}>{cities.length}</Text>
           </View>
         </View>
 
@@ -228,29 +237,27 @@ export default function GardeScreen() {
         data={filtered}
         keyExtractor={item => item.id}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />
         }
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.cityCard}
             onPress={() => router.push(`/pharmacieapp/garde/${encodeURIComponent(item.id)}?name=${encodeURIComponent(item.name)}`)}
-            activeOpacity={0.6}
+            activeOpacity={0.7}
           >
-            <View style={styles.cityIcon}>
-              <Ionicons name="location" size={22} color={Colors.primary} />
+            <View style={styles.cityInitial}>
+              <Text style={styles.cityInitialText}>{item.name.charAt(0)}</Text>
             </View>
             <View style={styles.cityInfo}>
               <Text style={styles.cityName}>{item.name}</Text>
             </View>
-            <View style={styles.chevronContainer}>
-              <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-            </View>
+            <Ionicons name="chevron-forward" size={18} color={Colors.borderLight} />
           </TouchableOpacity>
         )}
         ListEmptyComponent={
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
-              <Ionicons name="location-outline" size={40} color={Colors.textMuted} />
+              <Ionicons name="location-outline" size={36} color={Colors.accent} />
             </View>
             <Text style={styles.emptyTitle}>Aucune ville trouvee</Text>
             <Text style={styles.emptySubtitle}>
@@ -258,20 +265,28 @@ export default function GardeScreen() {
             </Text>
           </View>
         }
-        contentContainerStyle={{ paddingBottom: 20 }}
+        ListFooterComponent={
+          <View style={styles.adContainer}>
+            <BannerAd unitId={BANNER_AD_ID} size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER} />
+          </View>
+        }
+        contentContainerStyle={{ paddingTop: Spacing.sm, paddingBottom: 100 }}
         showsVerticalScrollIndicator={false}
       />
 
-      {/* Floating Locate Button */}
+      {/* FAB */}
       <TouchableOpacity
         style={styles.fab}
         onPress={handleLocate}
-        activeOpacity={0.8}
+        activeOpacity={0.85}
       >
-        <Ionicons name="locate" size={24} color={Colors.surface} />
+        <View style={styles.fabIcon}>
+          <Ionicons name="locate" size={18} color={'#FFFFFF'} />
+        </View>
+        <Text style={styles.fabText}>Pharmacie proche</Text>
       </TouchableOpacity>
 
-      {/* Nearby On-Duty Pharmacies Modal */}
+      {/* Nearby Modal */}
       <Modal
         visible={nearbyModalVisible}
         animationType="slide"
@@ -283,10 +298,11 @@ export default function GardeScreen() {
             <View style={styles.modalDragHandle} />
             <View style={styles.modalHeaderRow}>
               <View>
-                <Text style={styles.modalTitle}>De garde proches</Text>
+                <Text style={styles.modalLabelCaps}>DE GARDE</Text>
+                <Text style={styles.modalTitle}>Proches de vous</Text>
                 {!locating && !locationError && nearbyGardes.length > 0 && (
                   <Text style={styles.modalSubtitle}>
-                    {nearbyGardes.length} pharmacie{nearbyGardes.length > 1 ? 's' : ''} trouvee{nearbyGardes.length > 1 ? 's' : ''}
+                    {nearbyGardes.length} pharmacie{nearbyGardes.length > 1 ? 's' : ''}
                   </Text>
                 )}
               </View>
@@ -294,22 +310,25 @@ export default function GardeScreen() {
                 onPress={() => setNearbyModalVisible(false)}
                 style={styles.modalCloseBtn}
               >
-                <Ionicons name="close" size={22} color={Colors.text} />
+                <Ionicons name="close" size={20} color={Colors.text} />
               </TouchableOpacity>
             </View>
           </View>
 
           {locating && (
             <View style={styles.modalCentered}>
-              <ActivityIndicator size="large" color={Colors.primary} />
-              <Text style={styles.modalLoadingText}>Recherche des pharmacies de garde...</Text>
+              <View style={styles.locatingRing}>
+                <ActivityIndicator size="large" color={Colors.accent} />
+              </View>
+              <Text style={styles.modalLoadingText}>Recherche en cours...</Text>
+              <Text style={styles.modalLoadingHint}>Pharmacies de garde a proximite</Text>
             </View>
           )}
 
           {locationError && (
             <View style={styles.modalCentered}>
               <View style={styles.modalErrorIcon}>
-                <Ionicons name="location-outline" size={40} color={Colors.error} />
+                <Ionicons name="location-outline" size={36} color={Colors.error} />
               </View>
               <Text style={styles.modalErrorTitle}>Localisation impossible</Text>
               <Text style={styles.modalErrorText}>{locationError}</Text>
@@ -318,6 +337,7 @@ export default function GardeScreen() {
                 onPress={handleLocate}
                 activeOpacity={0.7}
               >
+                <Ionicons name="refresh" size={16} color="#FFFFFF" />
                 <Text style={styles.modalRetryText}>Reessayer</Text>
               </TouchableOpacity>
             </View>
@@ -330,22 +350,25 @@ export default function GardeScreen() {
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={styles.nearbyCard}
-                  activeOpacity={0.6}
+                  activeOpacity={0.7}
                   onPress={() => {
                     setNearbyModalVisible(false);
                     setTimeout(() => router.push(`/pharmacieapp/pharmacy/${item.id}`), 300);
                   }}
                 >
                   <View style={styles.nearbyCardIcon}>
-                    <Ionicons name="medical" size={20} color={Colors.surface} />
+                    <Ionicons name="medical" size={20} color={'#FFFFFF'} />
                   </View>
                   <View style={styles.nearbyCardInfo}>
                     <Text style={styles.nearbyCardName} numberOfLines={1}>{item.name}</Text>
-                    <Text style={styles.nearbyCardLocation} numberOfLines={1}>
-                      {item.zone || '—'} • {item.city || '—'}
-                    </Text>
-                    <View style={styles.distanceRow}>
-                      <Ionicons name="navigate-outline" size={12} color={Colors.primary} />
+                    <View style={styles.locationRow}>
+                      <Ionicons name="location-outline" size={13} color={Colors.textMuted} />
+                      <Text style={styles.nearbyCardLocation} numberOfLines={1}>
+                        {item.zone || '—'} • {item.city || '—'}
+                      </Text>
+                    </View>
+                    <View style={styles.distanceBadge}>
+                      <Ionicons name="navigate" size={11} color={Colors.accent} />
                       <Text style={styles.distanceText}>
                         {item.distance < 1
                           ? `${Math.round(item.distance * 1000)} m`
@@ -353,15 +376,13 @@ export default function GardeScreen() {
                       </Text>
                     </View>
                   </View>
-                  <View style={styles.chevronContainer}>
-                    <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={Colors.borderLight} />
                 </TouchableOpacity>
               )}
               ListEmptyComponent={
                 <View style={styles.empty}>
                   <View style={styles.emptyIcon}>
-                    <Ionicons name="moon-outline" size={40} color={Colors.textMuted} />
+                    <Ionicons name="moon-outline" size={36} color={Colors.accent} />
                   </View>
                   <Text style={styles.emptyTitle}>Aucune pharmacie de garde</Text>
                   <Text style={styles.emptySubtitle}>
@@ -369,7 +390,7 @@ export default function GardeScreen() {
                   </Text>
                 </View>
               }
-              contentContainerStyle={{ paddingBottom: 20 }}
+              contentContainerStyle={{ paddingTop: Spacing.sm, paddingBottom: 20 }}
               showsVerticalScrollIndicator={false}
             />
           )}
@@ -392,19 +413,43 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     alignItems: 'center',
-    gap: 12,
+    gap: 16,
+  },
+  loadingIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.accentLight,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   loadingText: {
     fontSize: 14,
     color: Colors.textMuted,
+    fontWeight: '500',
   },
+
+  // Header
   header: {
-    backgroundColor: Colors.surface,
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
+    backgroundColor: Colors.accentLight,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
     paddingBottom: Spacing.lg,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: 'rgba(253,129,0,0.15)',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  headerBgIcons: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  bgIcon: {
+    position: 'absolute',
+    opacity: 0.07,
   },
   headerTop: {
     flexDirection: 'row',
@@ -412,66 +457,78 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: Spacing.lg,
   },
+  labelCaps: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    color: Colors.accent,
+    marginBottom: 2,
+  },
   title: {
     fontSize: 28,
-    fontWeight: '800',
-    color: Colors.text,
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: Colors.primary,
-    fontWeight: '600',
-    marginTop: 2,
+    fontWeight: '700',
+    color: Colors.accentContainer,
+    letterSpacing: -0.3,
   },
   statBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    gap: 5,
+    backgroundColor: 'rgba(253,129,0,0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: BorderRadius.full,
-    marginTop: 4,
+    marginTop: 8,
   },
   statText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
-    color: Colors.primaryDark,
+    color: Colors.accentContainer,
   },
+
+  // Search
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: 'rgba(255,255,255,0.7)',
   },
   searchInput: {
     flex: 1,
     fontSize: 15,
     color: Colors.text,
   },
+
+  // City cards
   cityCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     paddingVertical: 14,
     paddingHorizontal: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderLight,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.sm,
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(189,202,186,0.15)',
+    ...Shadows.sm,
   },
-  cityIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.primaryLight,
+  cityInitial: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: Colors.accentLight,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  cityInitialText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.accent,
   },
   cityInfo: {
     flex: 1,
@@ -481,14 +538,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.text,
   },
-  chevronContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+
+  // Empty
   empty: {
     alignItems: 'center',
     paddingVertical: 80,
@@ -498,7 +549,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: Colors.borderLight,
+    backgroundColor: Colors.accentLight,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
@@ -512,39 +563,55 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.textMuted,
   },
+
+  // FAB
   fab: {
     position: 'absolute',
-    right: Spacing.lg,
-    bottom: Spacing.lg,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.primary,
+    right: Spacing.xl,
+    bottom: Spacing.xl,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.accent,
+    paddingLeft: 14,
+    paddingRight: 20,
+    paddingVertical: 14,
+    borderRadius: BorderRadius.full,
+    ...Shadows.lg,
+    shadowColor: Colors.accent,
+  },
+  fabIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: Colors.shadow,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
   },
+  fabText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+
+  // Modal
   modalContainer: {
     flex: 1,
     backgroundColor: Colors.background,
   },
   modalHeader: {
-    backgroundColor: Colors.surface,
-    paddingHorizontal: Spacing.lg,
+    backgroundColor: Colors.surfaceContainerLowest,
+    paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.lg,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: Colors.borderLight,
     alignItems: 'center',
   },
   modalDragHandle: {
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: Colors.border,
+    backgroundColor: Colors.surfaceContainerHigh,
     marginTop: Spacing.sm,
     marginBottom: Spacing.md,
   },
@@ -554,23 +621,30 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     width: '100%',
   },
+  modalLabelCaps: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    color: Colors.accent,
+    marginBottom: 2,
+  },
   modalTitle: {
     fontSize: 22,
-    fontWeight: '800',
-    color: Colors.text,
-    letterSpacing: -0.3,
+    fontWeight: '700',
+    color: Colors.accentContainer,
+    letterSpacing: -0.2,
   },
   modalSubtitle: {
-    fontSize: 14,
-    color: Colors.primary,
-    fontWeight: '600',
-    marginTop: 2,
+    fontSize: 13,
+    color: Colors.textMuted,
+    fontWeight: '500',
+    marginTop: 3,
   },
   modalCloseBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.surfaceContainer,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -581,15 +655,29 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: Spacing.xxxl,
   },
+  locatingRing: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.accentLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   modalLoadingText: {
-    fontSize: 14,
+    fontSize: 16,
+    color: Colors.text,
+    fontWeight: '600',
+  },
+  modalLoadingHint: {
+    fontSize: 13,
     color: Colors.textMuted,
   },
   modalErrorIcon: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: '#FEE2E2',
+    backgroundColor: Colors.errorContainer,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
@@ -605,58 +693,80 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   modalRetryBtn: {
-    backgroundColor: Colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.accent,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: BorderRadius.sm,
-    marginTop: 8,
+    borderRadius: BorderRadius.full,
+    marginTop: 12,
   },
   modalRetryText: {
     fontSize: 14,
     fontWeight: '700',
-    color: Colors.surface,
+    color: '#FFFFFF',
   },
+
+  // Nearby cards
   nearbyCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     paddingVertical: 14,
     paddingHorizontal: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderLight,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.sm,
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(189,202,186,0.15)',
+    ...Shadows.sm,
   },
   nearbyCardIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.primary,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: Colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
   },
   nearbyCardInfo: {
     flex: 1,
-    gap: 2,
+    gap: 4,
   },
   nearbyCardName: {
     fontSize: 15,
     fontWeight: '600',
     color: Colors.text,
-    flexShrink: 1,
   },
-  nearbyCardLocation: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-  },
-  distanceRow: {
+  locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginTop: 2,
+  },
+  nearbyCardLocation: {
+    fontSize: 13,
+    color: Colors.textMuted,
+    flexShrink: 1,
+  },
+  distanceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.accentLight,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+    alignSelf: 'flex-start',
   },
   distanceText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: Colors.primary,
+    fontWeight: '700',
+    color: Colors.accentContainer,
+  },
+  adContainer: {
+    alignItems: 'center',
+    paddingVertical: Spacing.lg,
   },
 });

@@ -1,8 +1,10 @@
+import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { PaperProvider, MD3LightTheme as DefaultTheme } from 'react-native-paper';
 import { Provider } from 'react-redux';
 import { store } from '@/store';
 import { StatusBar } from 'expo-status-bar';
+import { initAds } from '@/hooks/ads';
 
 const theme = {
   ...DefaultTheme,
@@ -14,6 +16,10 @@ const theme = {
 };
 
 export default function RootLayout() {
+  useEffect(() => {
+    initAds();
+  }, []);
+
   return (
     <Provider store={store}>
       <PaperProvider theme={theme}>
