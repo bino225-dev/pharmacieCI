@@ -392,7 +392,7 @@ export default function GardeScreen() {
         </SafeAreaView>
       </Modal>
 
-      {/* Fixed Banner Ad */}
+      {/* Banner Ad above tab bar */}
       <View style={styles.adContainer}>
         <BannerAd unitId={BANNER_AD_ID} size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER} />
       </View>
@@ -568,7 +568,7 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: Spacing.xl,
-    bottom: Spacing.xl,
+    bottom: 100,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
