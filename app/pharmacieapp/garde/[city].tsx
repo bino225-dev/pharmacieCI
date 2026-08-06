@@ -245,7 +245,15 @@ export default function GardeCityScreen() {
                       <Ionicons name="medical" size={18} color={active ? '#FFFFFF' : Colors.primary} />
                     </View>
                     <View style={styles.pharmacyInfo}>
-                      <Text style={styles.pharmacyName} numberOfLines={1}>{p.name}</Text>
+                      <View style={styles.pharmacyNameRow}>
+                        {active && (
+                          <View style={styles.gardeBadge}>
+                            <View style={styles.gardeDot} />
+                            <Text style={styles.gardeText}>GARDE</Text>
+                          </View>
+                        )}
+                        <Text style={styles.pharmacyName} numberOfLines={1}>{p.name}</Text>
+                      </View>
                       {p.zone && <Text style={styles.pharmacyZone}>{p.zone}</Text>}
                     </View>
                     <Ionicons name="chevron-forward" size={16} color={Colors.borderLight} />
@@ -480,10 +488,37 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
+  pharmacyNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  gardeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.accent,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+  },
+  gardeDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
+  },
+  gardeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.8,
+  },
   pharmacyName: {
     fontSize: 15,
     fontWeight: '600',
     color: Colors.text,
+    flexShrink: 1,
   },
   pharmacyZone: {
     fontSize: 13,
